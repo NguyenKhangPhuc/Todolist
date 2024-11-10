@@ -63,7 +63,7 @@ const TodoItem = ({ todo }: { todo: Todo }) => {
                 justifyContent={"space-between"}
             >
                 <Text
-                    color={todo.completed ? "white" : "black"}
+                    color={todo.completed ? "white" : "red"}
                     textDecoration={todo.completed ? "line-through" : "none"}
                 >
                     {todo.body}
