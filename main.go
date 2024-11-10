@@ -15,7 +15,7 @@ import (
 )
 
 type Todo struct {
-	ID        primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"`
+	ID        primitive.ObjectID `json:"_id,omitempty" bson:"_id,omitempty"`
 	Completed bool               `json:"completed"`
 	Body      string             `json:"body"`
 }
@@ -25,9 +25,12 @@ var collection *mongo.Collection
 func main() {
 	fmt.Println("hello")
 	//Get env file
-	err := godotenv.Load(".env")
-	if err != nil {
-		log.Fatal("Error loading .env file:", err)
+	if os.Getenv("ENV") != "production" {
+		//Load the env file if not in the production environment
+		err := godotenv.Load(".env")
+		if err != nil {
+			log.Fatal("Error loading .env file:", err)
+		}
 	}
 	//Create connection
 	MONGODB_URI := os.Getenv("MONGODB_URI")
@@ -49,14 +52,24 @@ func main() {
 
 	app := fiber.New()
 
+	// app.Use(cors.New(cors.Config{
+	// 	AllowOrigins: "http://localhost:5173",
+	// 	AllowHeaders: "Origin,Content-Type,Accept",
+	// }))
+
 	app.Get("/api/get-todos", getTodos)
 	app.Post("/api/todos", createTodo)
 	app.Patch("/api/todos/:id", updateTodo)
-	app.Delete("api/todos/:id", deleteTodo)
+	app.Delete("/api/todos/:id", deleteTodo)
+	app.Delete("/api/todos", deleteAll)
+	app.Post("/api/todos/deleteFinished", deleteFinished)
 
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "5000"
+	}
+	if os.Getenv("ENV") == "production" {
+		app.Static("/", "./client/dist")
 	}
 	log.Fatal(app.Listen("0.0.0.0:" + port))
 }
@@ -87,6 +100,20 @@ func createTodo(c *fiber.Ctx) error {
 
 	if err := c.BodyParser(todo); err != nil {
 		return err
+	}
+
+	cursor, err := collection.Find(context.Background(), bson.M{})
+	if err != nil {
+		return err
+	}
+	for cursor.Next(context.Background()) {
+		var available_todo Todo
+		if err := cursor.Decode(&available_todo); err != nil {
+			return err
+		}
+		if todo.Body == available_todo.Body {
+			return c.Status(200).JSON(fiber.Map{"message": "Task has already appeared in the ToDoList"})
+		}
 	}
 
 	if todo.Body == "" {
@@ -129,6 +156,35 @@ func deleteTodo(c *fiber.Ctx) error {
 	_, err = collection.DeleteOne(context.Background(), filter)
 	if err != nil {
 		return err
+	}
+	return c.Status(200).JSON(fiber.Map{"success": true})
+}
+func deleteAll(c *fiber.Ctx) error {
+	res, err := collection.DeleteMany(context.Background(), bson.M{})
+	if err != nil {
+		return err
+	}
+	return c.Status(200).JSON(res)
+}
+
+func deleteFinished(c *fiber.Ctx) error {
+	var requestBody struct {
+		UnFinished []Todo `json:"unFinished"`
+	}
+	if err := c.BodyParser(&requestBody); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
+	}
+	_, err := collection.DeleteMany(context.Background(), bson.M{})
+	if err != nil {
+		return err
+	}
+	todos := requestBody.UnFinished
+	fmt.Print(todos)
+	for _, todo := range todos {
+		_, err := collection.InsertOne(context.Background(), todo)
+		if err != nil {
+			return err
+		}
 	}
 	return c.Status(200).JSON(fiber.Map{"success": true})
 }
